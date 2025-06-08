@@ -1,10 +1,18 @@
 rpc:
-  "rpc1":
+  "solana-rpc1":
     url: "https://api.mainnet-beta.solana.com"
     rpc_type: "solanarpc"
   "jito-rpc1":
     url: "https://ny.mainnet.block-engine.jito.wtf/api/v1/transactions"
     rpc_type: "jito"
+  "bloxroute-rpc1":
+    url: "http://ny.solana.dex.blxrbdn.com/api/v2/submit"
+    rpc_type: "bloxroute"
+    auth: "the_key"
+  "nextblock-rpc1":
+    url: "http://fra.nextblock.io/api/v2/submit"
+    rpc_type: "nextblock"
+    auth: "the_key"
 
 geyser_url: "https://grpc.ny.shyft.to"
 geyser_x_token: ""

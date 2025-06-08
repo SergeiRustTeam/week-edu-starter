@@ -6,9 +6,10 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::reserved_account_keys::ReservedAccountKeys;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::TransactionStatusMeta;
+use solana_transaction_status::UiTransactionStatusMeta;
 
 pub fn extract_instructions(
-    meta_data: TransactionStatusMeta,
+    meta_data: UiTransactionStatusMeta,
     transaction: VersionedTransaction,
 ) -> GeyserResult<Vec<solana_sdk::instruction::Instruction>> {
     let message = transaction.message.clone();
@@ -45,9 +46,18 @@ pub fn extract_instructions(
             }
         }
         VersionedMessage::V0(v0) => {
+            let loaded_addresses_ui = meta.loaded_addresses.unwrap();
             let loaded_addresses = LoadedAddresses {
-                writable: meta.loaded_addresses.writable.iter().map(|key| key.clone()).collect(),
-                readonly: meta.loaded_addresses.readonly.iter().map(|key| key.clone()).collect(),
+                writable: loaded_addresses_ui
+                    .writable
+                    .iter()
+                    .map(|s| s.parse::<Pubkey>().expect("invalid pubkey"))
+                    .collect(),
+                readonly: loaded_addresses_ui
+                    .readonly
+                    .iter()
+                    .map(|s| s.parse::<Pubkey>().expect("invalid pubkey"))
+                    .collect(),
             };
 
             let loaded_message =

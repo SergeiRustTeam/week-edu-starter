@@ -1,4 +1,5 @@
 use crate::config::PingThingsArgs;
+use crate::meteora::SwapAccountsFromPoolCreationInstruction;
 use crate::tx_senders::solana_rpc::TxMetrics;
 use crate::tx_senders::transaction::TransactionConfig;
 use crate::tx_senders::{TxSender, create_tx_sender};
@@ -37,90 +38,88 @@ impl Bench {
         }
     }
 
-    pub async fn send_and_confirm_transaction(
+    pub async fn send_and_confirm_swap_transaction(
         tx_index: u32,
         rpc_sender: Arc<dyn TxSender>,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        token_source_mint: Pubkey, // always WSOL
+        token_dest_mint: Pubkey,
+        protocol_token_fee: Pubkey,
+        accounts: SwapAccountsFromPoolCreationInstruction,
     ) -> anyhow::Result<()> {
-        let start = tokio::time::Instant::now();
+        let started_at = tokio::time::Instant::now();
 
-        let _tx_result = rpc_sender
-            .send_transaction(
-                tx_index,
+        let tx_result = rpc_sender
+            .send_meteora_swap_transaction(
                 recent_blockhash,
-                token_address,
-                bonding_curve,
-                associated_bonding_curve,
+                token_source_mint, // always WSOL
+                token_dest_mint,
+                protocol_token_fee,
+                accounts,
             )
-            .await?;
+            .await;
 
-        info!(
-            "complete rpc: {:?} {:?} ms",
-            rpc_sender.name(),
-            start.elapsed().as_millis() as u64
-        );
+        let rpc_duration = started_at.elapsed().as_millis() as u64;
+        match tx_result {
+            Ok(_) => {
+                info!(
+                    "successfully completed rpc: {:?} {:?} ms",
+                    rpc_sender.name(),
+                    rpc_duration
+                );
+            }
+            Err(_) => {
+                error!("failed rpc: {:?} {:?} ms", rpc_sender.name(), rpc_duration);
+            }
+        };
+
         Ok(())
     }
 
-    pub async fn send_buy_tx(
+    pub async fn send_swap_tx(
         self,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
-    ) {
-        tokio::select! {
-            _ = self.send_buy_tx_inner(
-                recent_blockhash,
-                token_address,
-                bonding_curve,
-                associated_bonding_curve,
-            ) => {}
-        }
-    }
-
-    async fn send_buy_tx_inner(
-        self,
-        recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
-    ) {
+        token_source_mint: Pubkey,
+        token_dest_mint: Pubkey,
+        protocol_token_fee: Pubkey,
+        accounts: SwapAccountsFromPoolCreationInstruction,
+    ) -> anyhow::Result<()> {
         let start = tokio::time::Instant::now();
-        info!("starting create buy tx");
+        info!("starting create swap tx");
         let mut tx_handles = Vec::new();
 
         for rpc in &self.rpcs {
-            // let rpc_name = rpc.name();
+            info!("Creating sender: {}", rpc.name());
             let rpc_sender = rpc.clone();
-            // let client = self.client.clone();
+            let accounts = accounts.clone();
             let hdl = tokio::spawn(async move {
                 let index = 0;
-                if let Err(e) = Self::send_and_confirm_transaction(
+                if let Err(e) = Self::send_and_confirm_swap_transaction(
                     index,
                     rpc_sender,
                     recent_blockhash,
-                    token_address,
-                    bonding_curve,
-                    associated_bonding_curve,
+                    token_source_mint, // always WSOL
+                    token_dest_mint,
+                    protocol_token_fee,
+                    accounts,
                 )
                 .await
                 {
-                    error!("error end_and_confirm_transaction {:?}", e);
+                    error!("error send_and_confirm_swap_transaction {:?}", e);
                 }
             });
+            info!("Task hanled: {:?}", hdl);
             tx_handles.push(hdl);
         }
-        info!("waiting for transactions to complete...");
 
-        // wait for all transactions to complete
+        info!("waiting for swap transactions to complete...");
+
         for hdl in tx_handles {
             hdl.await.unwrap_or_default();
         }
 
-        info!("bench complete! {:?} ms", start.elapsed().as_millis() as u64);
+        info!("swap bench complete! {:?} ms", start.elapsed().as_millis() as u64);
+
+        Ok(())
     }
 }

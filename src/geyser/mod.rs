@@ -1,4 +1,4 @@
-use crate::pumpfun::PumpFunController;
+use crate::meteora::MeteoraController;
 use async_trait::async_trait;
 use futures::StreamExt;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -53,7 +53,7 @@ pub type GeyserResult<T> = Result<T, Error>;
 
 #[async_trait]
 pub trait YellowstoneGrpcGeyser: Send + Sync {
-    async fn consume(&self, pump_fun_controller: PumpFunController) -> GeyserResult<()>;
+    async fn consume(&self, meteora_controller: MeteoraController) -> GeyserResult<()>;
 }
 
 #[derive(Error, Debug)]
@@ -64,7 +64,7 @@ pub enum Error {
 
 #[async_trait]
 impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
-    async fn consume(&self, mut pump_fun_controller: PumpFunController) -> GeyserResult<()> {
+    async fn consume(&self, mut meteora_controller: MeteoraController) -> GeyserResult<()> {
         let endpoint = self.endpoint.clone();
         let x_token = self.x_token.clone();
         let commitment = self.commitment;
@@ -131,7 +131,7 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                                 }
                                             };
                                             // info!("signature {:?}", signature);
-                                            let _ = pump_fun_controller
+                                            let _ = meteora_controller
                                                 .transaction_handler(
                                                     signature,
                                                     versioned_transaction,

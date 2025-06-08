@@ -1,8 +1,8 @@
 use crate::config::{PingThingsArgs, RpcType};
-use crate::tx_senders::constants::{
-    JITO_TIP_ADDR, PUMP_FUN_ACCOUNT_ADDR, PUMP_FUN_PROGRAM_ADDR, PUMP_FUN_TX_ADDR, RENT_ADDR, SYSTEM_PROGRAM_ADDR,
-    TOKEN_PROGRAM_ADDR,
-};
+use crate::tx_senders::constants::*;
+
+use crate::meteora::*;
+
 use solana_sdk::compute_budget::ComputeBudgetInstruction;
 use solana_sdk::hash::Hash;
 use solana_sdk::instruction::{AccountMeta, Instruction};
@@ -15,17 +15,21 @@ use solana_sdk::system_instruction;
 use solana_sdk::transaction::VersionedTransaction;
 use spl_associated_token_account::get_associated_token_address;
 use spl_associated_token_account::instruction::create_associated_token_account;
+use tracing::debug;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
 #[derive(Clone)]
 pub struct TransactionConfig {
-    pub keypair: Arc<Keypair>,
+    pub keypair: Arc<Keypair>, // payer + signer
     pub compute_unit_limit: u32,
     pub compute_unit_price: u64,
     pub tip: u64,
     pub buy_amount: u64,
     pub min_amount_out: u64,
+    pub activation_point: Option<u64>, // not used yet
 }
 
 impl From<PingThingsArgs> for TransactionConfig {
@@ -43,96 +47,148 @@ impl From<PingThingsArgs> for TransactionConfig {
             tip,
             buy_amount,
             min_amount_out,
+            activation_point: None,
         }
     }
 }
-pub fn build_transaction_with_config(
+
+use borsh::{BorshDeserialize, BorshSerialize};
+
+#[derive(BorshSerialize, BorshDeserialize)]
+struct SwapInstructionData {
+    buy_amount: u64,
+    min_amount_out: u64,
+    activation_point: Option<u64>,
+}
+
+pub fn build_meteora_swap_transaction_with_config(
     tx_config: &TransactionConfig,
     rpc_type: &RpcType,
     recent_blockhash: Hash,
-    token_address: Pubkey,
-    bonding_curve: Pubkey,
-    associated_bonding_curve: Pubkey,
+    token_source_mint: Pubkey, // always WSOL
+    token_dest_mint: Pubkey,
+    protocol_token_fee: Pubkey,
+    accounts: SwapAccountsFromPoolCreationInstruction,
 ) -> VersionedTransaction {
+    assert!(tx_config.buy_amount > 0, "buy_amount must be > 0");
+
     let mut instructions = Vec::new();
 
     if tx_config.compute_unit_limit > 0 {
         let compute_unit_limit = ComputeBudgetInstruction::set_compute_unit_limit(tx_config.compute_unit_limit);
         instructions.push(compute_unit_limit);
     }
-
     if tx_config.compute_unit_price > 0 {
         let compute_unit_price = ComputeBudgetInstruction::set_compute_unit_price(tx_config.compute_unit_price);
         instructions.push(compute_unit_price);
     }
 
     if tx_config.tip > 0 {
-        let tip_instruction: Option<Instruction> = match rpc_type {
+        let tip_instruction = match &rpc_type {
             RpcType::Jito => Some(system_instruction::transfer(
                 &tx_config.keypair.pubkey(),
-                &Pubkey::from_str(JITO_TIP_ADDR).unwrap(),
+                &JITO_TIP_PUBKEY,
+                tx_config.tip,
+            )),
+            RpcType::NextBlock => Some(system_instruction::transfer(
+                &tx_config.keypair.pubkey(),
+                &NEXTBLOCK_TIP_PUBKEY,
+                tx_config.tip,
+            )),
+            RpcType::Bloxroute => Some(system_instruction::transfer(
+                &tx_config.keypair.pubkey(),
+                &BLOXROUTE_TIP_PUBKEY,
                 tx_config.tip,
             )),
             _ => None,
         };
 
-        if tip_instruction.is_some() {
-            instructions.push(tip_instruction.unwrap());
+        if let Some(tip_instruction) = tip_instruction {
+            instructions.push(tip_instruction);
         }
     }
 
-    let pump_fun_account_pubkey: Pubkey = Pubkey::from_str(PUMP_FUN_ACCOUNT_ADDR).unwrap();
-    let pump_fun_tx_pubkey: Pubkey = Pubkey::from_str(PUMP_FUN_TX_ADDR).unwrap();
-    let pump_fun_program_pubkey: Pubkey = Pubkey::from_str(PUMP_FUN_PROGRAM_ADDR).unwrap();
-
-    let rent_pubkey: Pubkey = Pubkey::from_str(RENT_ADDR).unwrap();
-    let system_program_pubkey: Pubkey = Pubkey::from_str(SYSTEM_PROGRAM_ADDR).unwrap();
     let token_program_pubkey: Pubkey = Pubkey::from_str(TOKEN_PROGRAM_ADDR).unwrap();
 
     let owner = tx_config.keypair.pubkey();
-    let spl_token_address = get_associated_token_address(&owner, &token_address);
+
+    let user_source_token = get_associated_token_address(&owner, &token_source_mint);
+    let user_destination_token = get_associated_token_address(&owner, &token_dest_mint);
 
     let token_account_instruction =
-        create_associated_token_account(&owner, &owner, &token_address, &token_program_pubkey);
-
+        create_associated_token_account(&owner, &owner, &token_dest_mint, &token_program_pubkey);
     instructions.push(token_account_instruction);
 
-    // Swap instruction data
-    let buy: u64 = 16927863322537952870;
+    let swap_accounts = SwapAccounts {
+        pool: accounts.pool,
+        user_source_token,
+        user_destination_token,
+        a_vault: accounts.a_vault,
+        b_vault: accounts.b_vault,
+        a_token_vault: accounts.a_token_vault,
+        b_token_vault: accounts.b_token_vault,
+        a_vault_lp_mint: accounts.a_vault_lp_mint,
+        b_vault_lp_mint: accounts.b_vault_lp_mint,
+        a_vault_lp: accounts.a_vault_lp,
+        b_vault_lp: accounts.b_vault_lp,
+        protocol_token_fee,
+        user: owner,
+        vault_program: accounts.vault_program,
+        token_program: accounts.token_program,
+    };
+
+    const METEORA_SWP_IX_DISC: [u8; 8] = [248, 198, 158, 145, 225, 117, 135, 200];
+    //let swap_discriminator = anchor_discriminator("swap");
+
+    /*let mut data = vec![];
+    data.extend_from_slice(&METEORA_SWP_IX_DISC);
+    data.extend_from_slice(&tx_config.buy_amount.to_le_bytes()); // inAmount
+    data.extend_from_slice(&tx_config.min_amount_out.to_le_bytes()); // minimumOutAmount
+    data.push(0x00 as u8); // Option::None for activation_point*/
+
+    let swap_data = SwapInstructionData {
+        buy_amount: tx_config.buy_amount,
+        min_amount_out: tx_config.min_amount_out,
+        activation_point: None,
+    };
+    let swap_data = borsh::to_vec(&swap_data).expect("failed to serialize swap data");
     let mut data = vec![];
-    data.extend_from_slice(&buy.to_le_bytes());
-    data.extend_from_slice(&tx_config.min_amount_out.to_le_bytes());
-    data.extend_from_slice(&tx_config.buy_amount.to_le_bytes());
+    data.extend_from_slice(&METEORA_SWP_IX_DISC);
+    data.extend_from_slice(&swap_data);
+
+    assert!(data.len() == 25 || data.len() == 33, "Unexpected swap data length");
 
     let accounts = vec![
-        AccountMeta::new_readonly(pump_fun_account_pubkey, false),
-        AccountMeta::new(
-            Pubkey::from_str("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM").unwrap(),
-            false,
-        ),
-        AccountMeta::new_readonly(token_address, false),
-        AccountMeta::new(bonding_curve, false),
-        AccountMeta::new(associated_bonding_curve, false),
-        AccountMeta::new(spl_token_address, false),
-        AccountMeta::new(owner, true),
-        AccountMeta::new_readonly(system_program_pubkey, false),
-        AccountMeta::new_readonly(token_program_pubkey, false),
-        AccountMeta::new_readonly(rent_pubkey, false),
-        AccountMeta::new_readonly(pump_fun_tx_pubkey, false),
-        AccountMeta::new_readonly(pump_fun_program_pubkey, false),
+        AccountMeta::new(swap_accounts.pool, false),                   // 0: pool
+        AccountMeta::new(swap_accounts.user_source_token, false),      // 1: userSourceToken
+        AccountMeta::new(swap_accounts.user_destination_token, false), // 2: userDestinationToken
+        AccountMeta::new(swap_accounts.a_vault, false),                // 3: aVault
+        AccountMeta::new(swap_accounts.b_vault, false),                // 4: bVault
+        AccountMeta::new(swap_accounts.a_token_vault, false),          // 5: aTokenVault
+        AccountMeta::new(swap_accounts.b_token_vault, false),          // 6: bTokenVault
+        AccountMeta::new(swap_accounts.a_vault_lp_mint, false),        // 7: aVaultLpMint
+        AccountMeta::new(swap_accounts.b_vault_lp_mint, false),        // 8: bVaultLpMint
+        AccountMeta::new(swap_accounts.a_vault_lp, false),             // 9: aVaultLp
+        AccountMeta::new(swap_accounts.b_vault_lp, false),             // 10: bVaultLp
+        AccountMeta::new(swap_accounts.protocol_token_fee, false),     // 11: protocolTokenFee
+        AccountMeta::new_readonly(swap_accounts.user, true),           // 12: user
+        AccountMeta::new_readonly(swap_accounts.vault_program, false), // 13: vaultProgram
+        AccountMeta::new_readonly(swap_accounts.token_program, false), // 14: tokenProgram
     ];
 
     let swap_instruction = Instruction {
-        program_id: Pubkey::from_str(PUMP_FUN_PROGRAM_ADDR).unwrap(),
+        program_id: Pubkey::from_str(METEORA_PROGRAM_ID).unwrap(),
         accounts,
         data,
     };
 
     instructions.push(swap_instruction);
 
-    let message_v0 = Message::try_compile(&owner, instructions.as_slice(), &[], recent_blockhash).unwrap();
+    for (i, ix) in instructions.iter().enumerate() {
+        debug!("Instruction {}: {:?}", i, ix);
+    }
 
-    let versioned_message = VersionedMessage::V0(message_v0);
-
-    VersionedTransaction::try_new(versioned_message, &[&tx_config.keypair]).unwrap()
+    let message = Message::try_compile(&owner, &instructions, &[], recent_blockhash).expect("compile message failed");
+    let versioned_msg = VersionedMessage::V0(message);
+    VersionedTransaction::try_new(versioned_msg, &[&*tx_config.keypair]).expect("failed to build versioned transaction")
 }

@@ -1,4 +1,6 @@
 use crate::config::{RpcConfig, RpcType};
+use crate::meteora::*;
+use crate::tx_senders::bloxroute::RelayTxSender;
 use crate::tx_senders::jito::JitoTxSender;
 use crate::tx_senders::solana_rpc::GenericRpc;
 use crate::tx_senders::transaction::TransactionConfig;
@@ -10,6 +12,7 @@ use solana_sdk::signature::Signature;
 use std::sync::Arc;
 use tracing::info;
 
+pub mod bloxroute;
 pub mod constants;
 pub mod jito;
 pub mod solana_rpc;
@@ -33,13 +36,14 @@ impl Into<String> for TxResult {
 #[async_trait]
 pub trait TxSender: Sync + Send {
     fn name(&self) -> String;
-    async fn send_transaction(
+
+    async fn send_meteora_swap_transaction(
         &self,
-        index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        token_a_mint: Pubkey, // always WSOL
+        token_b_mint: Pubkey,
+        protocol_token_fee: Pubkey,
+        accounts: SwapAccountsFromPoolCreationInstruction,
     ) -> anyhow::Result<TxResult>;
 }
 
@@ -57,6 +61,17 @@ pub fn create_tx_sender(
         }
         RpcType::Jito => {
             let tx_sender = JitoTxSender::new(name, rpc_config.url, tx_config, client);
+            Arc::new(tx_sender)
+        }
+        RpcType::Bloxroute | RpcType::NextBlock => {
+            let tx_sender = RelayTxSender::new(
+                name,
+                rpc_config.url.clone(),
+                rpc_config.auth.expect("auth header required"),
+                rpc_config.rpc_type,
+                tx_config,
+                client,
+            );
             Arc::new(tx_sender)
         }
     }

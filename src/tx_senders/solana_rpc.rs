@@ -1,6 +1,8 @@
 use crate::config::RpcType;
-use crate::tx_senders::transaction::{TransactionConfig, build_transaction_with_config};
+use crate::meteora::*;
+use crate::tx_senders::transaction::{TransactionConfig, build_meteora_swap_transaction_with_config};
 use crate::tx_senders::{TxResult, TxSender};
+
 use anyhow::Context;
 use async_trait::async_trait;
 use serde::Serialize;
@@ -10,6 +12,7 @@ use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
 use solana_transaction_status::UiTransactionEncoding;
 use std::sync::Arc;
+use tracing::{error, info};
 
 #[derive(Clone)]
 pub struct GenericRpc {
@@ -49,23 +52,25 @@ impl TxSender for GenericRpc {
         self.name.clone()
     }
 
-    async fn send_transaction(
+    async fn send_meteora_swap_transaction(
         &self,
-        _index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        token_source_mint: Pubkey, // always WSOL
+        token_dest_mint: Pubkey,
+        protocol_token_fee: Pubkey,
+        accounts: SwapAccountsFromPoolCreationInstruction,
     ) -> anyhow::Result<TxResult> {
-        let transaction = build_transaction_with_config(
+        let transaction = build_meteora_swap_transaction_with_config(
             &self.tx_config,
             &self.rpc_type,
             recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
+            token_source_mint, // always WSOL
+            token_dest_mint,
+            protocol_token_fee,
+            accounts,
         );
-        let sig = self
+
+        let res = self
             .http_rpc
             .send_transaction_with_config(&transaction, RpcSendTransactionConfig {
                 skip_preflight: true,
@@ -74,8 +79,11 @@ impl TxSender for GenericRpc {
                 max_retries: None,
                 min_context_slot: None,
             })
-            .await
-            .context(format!("Failed to send transaction for {}", self.name))?;
+            .await;
+        if let Err(err) = &res {
+            error!("Solana RPC failed: {}", err);
+        }
+        let sig = res.context(format!("Failed to send Meteora swap transaction for {}", self.name))?;
         Ok(TxResult::Signature(sig))
     }
 }

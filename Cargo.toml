@@ -27,3 +27,8 @@ bincode = "1.3"
 futures = "0.3.31"
 thiserror = { version = "1.0.69", features = [] }
 borsh = "1.5.1"
+lazy_static = "1.4"
+spl-token = { version = "4.0", features = ["no-entrypoint"] }
+base64 = "0.21"
+sha2 = "0.10.9"
+solana-transaction-status-client-types = "=2.2.1"
