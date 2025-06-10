@@ -74,7 +74,6 @@ pub struct JitoBundleStatusResponse {
 
 #[derive(Deserialize)]
 pub struct JitoResponse {
-    //bundle id is response
     pub result: String,
 }
 

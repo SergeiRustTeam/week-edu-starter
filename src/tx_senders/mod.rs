@@ -1,5 +1,7 @@
 use crate::config::{RpcConfig, RpcType};
+use crate::tx_senders::bloxroute::BloxrouteTxSender;
 use crate::tx_senders::jito::JitoTxSender;
+use crate::tx_senders::nextblock::NextBlockTxSender;
 use crate::tx_senders::solana_rpc::GenericRpc;
 use crate::tx_senders::transaction::TransactionConfig;
 use async_trait::async_trait;
@@ -10,8 +12,10 @@ use solana_sdk::signature::Signature;
 use std::sync::Arc;
 use tracing::info;
 
+pub mod bloxroute;
 pub mod constants;
 pub mod jito;
+pub mod nextblock;
 pub mod solana_rpc;
 pub mod transaction;
 
@@ -49,14 +53,25 @@ pub fn create_tx_sender(
     tx_config: TransactionConfig,
     client: Client,
 ) -> Arc<dyn TxSender> {
-    info!("create_tx_sender {:?}", rpc_config.rpc_type);
     match rpc_config.rpc_type {
         RpcType::SolanaRpc => {
+            info!("Creating: Solana PRC-sender: {}", rpc_config.url);
             let tx_sender = GenericRpc::new(name, rpc_config.url, tx_config, RpcType::SolanaRpc);
             Arc::new(tx_sender)
         }
         RpcType::Jito => {
+            info!("Creating: Jito-sender: {}", rpc_config.url,);
             let tx_sender = JitoTxSender::new(name, rpc_config.url, tx_config, client);
+            Arc::new(tx_sender)
+        }
+        RpcType::Bloxroute => {
+            info!("Creating: Bloxroute-sender: {}", rpc_config.url);
+            let tx_sender = BloxrouteTxSender::new(name, rpc_config.url, tx_config, client, rpc_config.auth);
+            Arc::new(tx_sender)
+        }
+        RpcType::NextBlock => {
+            info!("Creating: NexBlock-sender: {}", rpc_config.url);
+            let tx_sender = NextBlockTxSender::new(name, rpc_config.url, tx_config, client, rpc_config.auth);
             Arc::new(tx_sender)
         }
     }

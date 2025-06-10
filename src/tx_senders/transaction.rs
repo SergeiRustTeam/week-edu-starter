@@ -18,7 +18,7 @@ use spl_associated_token_account::instruction::create_associated_token_account;
 use std::str::FromStr;
 use std::sync::Arc;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TransactionConfig {
     pub keypair: Arc<Keypair>,
     pub compute_unit_limit: u32,
@@ -97,7 +97,6 @@ pub fn build_transaction_with_config(
 
     instructions.push(token_account_instruction);
 
-    // Swap instruction data
     let buy: u64 = 16927863322537952870;
     let mut data = vec![];
     data.extend_from_slice(&buy.to_le_bytes());

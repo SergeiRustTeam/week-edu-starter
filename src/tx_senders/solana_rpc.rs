@@ -28,7 +28,7 @@ pub struct TxMetrics {
     pub slot_sent: u64,
     pub slot_landed: Option<u64>,
     pub slot_latency: Option<u64>,
-    pub elapsed: Option<u64>, // in milliseconds
+    pub elapsed: Option<u64>,
 }
 
 impl GenericRpc {
