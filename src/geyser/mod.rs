@@ -104,8 +104,8 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                     Ok((_subscribe_tx, mut stream)) => {
                         while let Some(message) = stream.next().await {
                             match message {
-                                Ok(msg) => match msg.update_oneof {
-                                    Some(UpdateOneof::Transaction(transaction_update)) => {
+                                Ok(msg) => {
+                                    if let Some(UpdateOneof::Transaction(transaction_update)) = msg.update_oneof {
                                         let _start_time = std::time::Instant::now();
 
                                         if let Some(transaction_info) = transaction_update.transaction {
@@ -147,9 +147,7 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                             );
                                         }
                                     }
-
-                                    _ => {}
-                                },
+                                }
                                 Err(error) => {
                                     error!("Geyser stream error: {error:?}");
                                     break;
