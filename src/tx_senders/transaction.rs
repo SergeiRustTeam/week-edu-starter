@@ -34,7 +34,7 @@ impl From<PingThingsArgs> for TransactionConfig {
 
         let tip: u64 = (args.tip * LAMPORTS_PER_SOL as f64) as u64;
         let buy_amount: u64 = (args.buy_amount * LAMPORTS_PER_SOL as f64) as u64;
-        let min_amount_out: u64 = (args.min_amount_out * 1_000_000 as f64) as u64;
+        let min_amount_out: u64 = (args.min_amount_out * 1_000_000_f64) as u64;
 
         TransactionConfig {
             keypair: Arc::new(keypair),

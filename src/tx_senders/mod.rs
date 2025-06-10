@@ -21,9 +21,9 @@ pub enum TxResult {
     BundleID(String),
 }
 
-impl Into<String> for TxResult {
-    fn into(self) -> String {
-        match self {
+impl From<TxResult> for String {
+    fn from(val: TxResult) -> Self {
+        match val {
             TxResult::Signature(sig) => sig.to_string(),
             TxResult::BundleID(bundle_id) => bundle_id,
         }

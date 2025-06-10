@@ -18,7 +18,7 @@ pub fn extract_instructions(
 
     match message {
         VersionedMessage::Legacy(legacy) => {
-            for (_i, compiled_instruction) in legacy.instructions.iter().enumerate() {
+            for compiled_instruction in legacy.instructions.iter() {
                 let program_id = *legacy
                     .account_keys
                     .get(compiled_instruction.program_id_index as usize)
@@ -46,14 +46,14 @@ pub fn extract_instructions(
         }
         VersionedMessage::V0(v0) => {
             let loaded_addresses = LoadedAddresses {
-                writable: meta.loaded_addresses.writable.iter().map(|key| key.clone()).collect(),
-                readonly: meta.loaded_addresses.readonly.iter().map(|key| key.clone()).collect(),
+                writable: meta.loaded_addresses.writable.to_vec(),
+                readonly: meta.loaded_addresses.readonly.to_vec(),
             };
 
             let loaded_message =
                 LoadedMessage::new(v0.clone(), loaded_addresses, &ReservedAccountKeys::empty_key_set());
 
-            for (_i, compiled_instruction) in v0.instructions.iter().enumerate() {
+            for compiled_instruction in v0.instructions.iter() {
                 let program_id = *loaded_message
                     .account_keys()
                     .get(compiled_instruction.program_id_index as usize)
@@ -65,11 +65,11 @@ pub fn extract_instructions(
                     .filter_map(|account_index| {
                         let account_pubkey = loaded_message.account_keys().get(*account_index as usize);
 
-                        return Some(AccountMeta {
-                            pubkey: account_pubkey.map(|acc| acc.clone()).unwrap_or_default(),
+                        Some(AccountMeta {
+                            pubkey: account_pubkey.copied().unwrap_or_default(),
                             is_writable: loaded_message.is_writable(*account_index as usize),
                             is_signer: loaded_message.is_signer(*account_index as usize),
-                        });
+                        })
                     })
                     .collect();
 
