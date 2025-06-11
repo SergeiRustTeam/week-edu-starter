@@ -1,9 +1,8 @@
 use crate::config::RpcType;
-use crate::tx_senders::transaction::{TransactionConfig, build_transaction_with_config};
+use crate::tx_senders::transaction::{TransactionConfig, PoolVaultInfo, build_transaction_with_config};
 use crate::tx_senders::{TxResult, TxSender};
 use anyhow::Context;
 use async_trait::async_trait;
-use serde::Serialize;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcSendTransactionConfig;
 use solana_sdk::hash::Hash;
@@ -17,18 +16,6 @@ pub struct GenericRpc {
     pub http_rpc: Arc<RpcClient>,
     tx_config: TransactionConfig,
     rpc_type: RpcType,
-}
-
-#[derive(Serialize, Debug)]
-pub struct TxMetrics {
-    pub rpc_name: String,
-    pub signature: String,
-    pub index: u32,
-    pub success: bool,
-    pub slot_sent: u64,
-    pub slot_landed: Option<u64>,
-    pub slot_latency: Option<u64>,
-    pub elapsed: Option<u64>, // in milliseconds
 }
 
 impl GenericRpc {
@@ -53,17 +40,15 @@ impl TxSender for GenericRpc {
         &self,
         _index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        target_token: Pubkey,
+        pool_vault_info: PoolVaultInfo,
     ) -> anyhow::Result<TxResult> {
         let transaction = build_transaction_with_config(
             &self.tx_config,
             &self.rpc_type,
             recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
+            target_token,
+            pool_vault_info,
         );
         let sig = self
             .http_rpc

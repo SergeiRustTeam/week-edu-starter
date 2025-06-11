@@ -4,10 +4,7 @@ use std::fs;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct PingThingsArgs {
-    // rpc_name -> rpc_url
     pub rpc: HashMap<String, RpcConfig>,
-    pub http_rpc: String,
-    pub ws_rpc: String,
     pub geyser_url: String,
     pub geyser_x_token: String,
     pub private_key: String,
@@ -19,12 +16,15 @@ pub struct PingThingsArgs {
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
-#[serde(rename_all = "lowercase")] // Allows lowercase matching for variants
+#[serde(rename_all = "snake_case")]
 pub enum RpcType {
     #[default]
     SolanaRpc,
     Jito,
+    Bloxroute,
+    NextBlock,
 }
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct RpcConfig {
     pub url: String,

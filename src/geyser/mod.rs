@@ -1,16 +1,15 @@
-use crate::pumpfun::PumpFunController;
+const MODULE: &str = "Geyser";
+use crate::meteora::MeteoraController;
 use async_trait::async_trait;
 use futures::StreamExt;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 use std::collections::HashSet;
-use std::convert::TryFrom;
-use std::time::Duration;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::sync::RwLock;
-use tracing::error;
+use tracing::{error, info};
 use yellowstone_grpc_client::GeyserGrpcClient;
-use yellowstone_grpc_proto::tonic::transport::ClientTlsConfig;
 use yellowstone_grpc_proto::{
     convert_from::{create_tx_meta, create_tx_versioned},
     geyser::{
@@ -53,7 +52,7 @@ pub type GeyserResult<T> = Result<T, Error>;
 
 #[async_trait]
 pub trait YellowstoneGrpcGeyser: Send + Sync {
-    async fn consume(&self, pump_fun_controller: PumpFunController) -> GeyserResult<()>;
+    async fn consume(&self, meteora_controller: MeteoraController) -> GeyserResult<()>;
 }
 
 #[derive(Error, Debug)]
@@ -64,7 +63,7 @@ pub enum Error {
 
 #[async_trait]
 impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
-    async fn consume(&self, mut pump_fun_controller: PumpFunController) -> GeyserResult<()> {
+    async fn consume(&self, mut meteora_controller: MeteoraController) -> GeyserResult<()> {
         let endpoint = self.endpoint.clone();
         let x_token = self.x_token.clone();
         let commitment = self.commitment;
@@ -75,10 +74,6 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
         let mut geyser_client = GeyserGrpcClient::build_from_shared(endpoint)
             .map_err(|err| Error::Custom(err.to_string()))?
             .x_token(x_token)
-            .map_err(|err| Error::Custom(err.to_string()))?
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(15))
-            .tls_config(ClientTlsConfig::new().with_enabled_roots())
             .map_err(|err| Error::Custom(err.to_string()))?
             .connect()
             .await
@@ -112,7 +107,8 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                             let Ok(signature) = Signature::try_from(transaction_info.signature) else {
                                                 continue;
                                             };
-                                            let Some(yellowstone_transaction) = transaction_info.transaction else {
+                                            let transaction = transaction_info.transaction;
+                                            let Some(yellowstone_transaction) = transaction else {
                                                 continue;
                                             };
                                             let Some(yellowstone_tx_meta) = transaction_info.meta else {
@@ -126,22 +122,24 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                             let meta_original = match create_tx_meta(yellowstone_tx_meta) {
                                                 Ok(meta) => meta,
                                                 Err(err) => {
-                                                    error!("Failed to create transaction meta: {:?}", err);
+                                                    info!(
+                                                        "{MODULE} Error: Failed to create transaction meta: {:?}",
+                                                        err
+                                                    );
                                                     continue;
                                                 }
                                             };
-                                            // info!("signature {:?}", signature);
-                                            let _ = pump_fun_controller
+
+                                            let _ = meteora_controller
                                                 .transaction_handler(
                                                     signature,
                                                     versioned_transaction,
                                                     meta_original,
-                                                    transaction_info.is_vote,
                                                     transaction_update.slot,
                                                 )
                                                 .await;
                                         } else {
-                                            error!(
+                                            info!(
                                                 "No transaction info in `UpdateOneof::Transaction` at slot {}",
                                                 transaction_update.slot
                                             );
@@ -151,14 +149,14 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                     _ => {}
                                 },
                                 Err(error) => {
-                                    error!("Geyser stream error: {error:?}");
+                                    info!("{MODULE} Error: stream error: {error:?}");
                                     break;
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        error!("Failed to subscribe: {:?}", e);
+                        info!("{MODULE} Error: Failed to subscribe: {:?}", e);
                     }
                 }
             }

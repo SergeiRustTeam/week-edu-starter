@@ -4,5 +4,5 @@
 
 target/
 
-config*.yaml
+#config*.yaml
 !*.example.yaml
