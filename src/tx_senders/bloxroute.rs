@@ -1,6 +1,6 @@
 const MODULE: &str = "Blocxroute";
 use crate::config::RpcType;
-use crate::tx_senders::transaction::{TransactionConfig, build_transaction_with_config};
+use crate::tx_senders::transaction::{TransactionConfig, PoolVaultInfo, build_transaction_with_config};
 use crate::tx_senders::{TxResult, TxSender};
 use anyhow::Context;
 use async_trait::async_trait;
@@ -84,8 +84,6 @@ struct BloxrouteResponse {
     tx_id: Option<String>,
     #[serde(alias = "signature")]
     signature: Option<String>,
-    #[serde(alias = "message")]
-    message: Option<String>,
 }
 
 #[async_trait]
@@ -98,17 +96,15 @@ impl TxSender for BloxrouteTxSender {
         &self,
         index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        target_token: Pubkey,
+        pool_vault_info: PoolVaultInfo,
     ) -> anyhow::Result<TxResult> {
         let tx = build_transaction_with_config(
             &self.tx_config,
             &RpcType::Bloxroute,
             recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
+            target_token,
+            pool_vault_info,
         );
 
         let tx_bytes = bincode::serialize(&tx).context("Failed to serialize transaction")?;
@@ -152,7 +148,7 @@ impl TxSender for BloxrouteTxSender {
             }
         } else {
             let error_msg = format!("{MODULE} error: Status: {} Text: {}", status, response_text);
-            info!("{}", error_msg);
+            info!("{MODULE} error: {}", error_msg);
             Err(anyhow::anyhow!(error_msg))
         }
     }

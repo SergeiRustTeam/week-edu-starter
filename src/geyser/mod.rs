@@ -2,9 +2,9 @@ const MODULE: &str = "Geyser";
 use crate::meteora::MeteoraController;
 use async_trait::async_trait;
 use futures::StreamExt;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 use std::collections::HashSet;
-use std::convert::TryFrom;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tokio::sync::RwLock;
@@ -107,7 +107,8 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                             let Ok(signature) = Signature::try_from(transaction_info.signature) else {
                                                 continue;
                                             };
-                                            let Some(yellowstone_transaction) = transaction_info.transaction else {
+                                            let transaction = transaction_info.transaction;
+                                            let Some(yellowstone_transaction) = transaction else {
                                                 continue;
                                             };
                                             let Some(yellowstone_tx_meta) = transaction_info.meta else {
@@ -134,7 +135,6 @@ impl YellowstoneGrpcGeyser for YellowstoneGrpcGeyserClient {
                                                     signature,
                                                     versioned_transaction,
                                                     meta_original,
-                                                    transaction_info.is_vote,
                                                     transaction_update.slot,
                                                 )
                                                 .await;

@@ -1,6 +1,10 @@
 use crate::bench::Bench;
 use crate::config::PingThingsArgs;
 use crate::core::extract_instructions;
+use crate::tx_senders::constants::{
+    ADD_LIQUIDITY_DISC, DEPOSIT_DISC, INIT_POOL_CONFIG2_DISC, IX_DISCRIMINATOR_SIZE, METEORA_PROGRAM_ADDR, WSOL_MINT,
+};
+use crate::tx_senders::transaction::PoolVaultInfo;
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
@@ -9,12 +13,6 @@ use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::TransactionStatusMeta;
 use std::str::FromStr;
 use tracing::info;
-
-pub const METEORA_PROGRAM_ADDR: &str = "Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB";
-pub const WSOL_MINT: &str = "So11111111111111111111111111111111111111112";
-pub const IX_DISCRIMINATOR_SIZE: usize = 8;
-
-pub const INIT_POOL_CONFIG2_DISC: [u8; 8] = [175, 175, 109, 31, 13, 152, 155, 237];
 
 #[derive(Debug, Clone)]
 pub struct PoolInfo {
@@ -25,11 +23,14 @@ pub struct PoolInfo {
     pub b_vault: Pubkey,
     pub a_token_vault: Pubkey,
     pub b_token_vault: Pubkey,
+    pub a_vault_lp_mint: Pubkey,
+    pub b_vault_lp_mint: Pubkey,
     pub a_vault_lp: Pubkey,
     pub b_vault_lp: Pubkey,
+    pub protocol_token_a_fee: Pubkey,
+    pub protocol_token_b_fee: Pubkey,
     pub is_wsol_pair: bool,
     pub wsol_is_token_a: bool,
-    pub instruction_type: String,
     pub liquidity_added: bool,
 }
 
@@ -43,7 +44,6 @@ pub struct InitPoolConfig2Data {
 pub struct MeteoraController {
     config: PingThingsArgs,
     bench: Bench,
-    is_buy: bool,
     processed_pools: std::collections::HashSet<Pubkey>,
 }
 
@@ -52,50 +52,58 @@ impl MeteoraController {
         MeteoraController {
             config,
             bench,
-            is_buy: false,
             processed_pools: std::collections::HashSet::new(),
         }
     }
 
     pub async fn transaction_handler(
         &mut self,
-        signature: Signature,
+        _signature: Signature,
         transaction: VersionedTransaction,
         meta: TransactionStatusMeta,
-        _is_vote: bool,
         _slot: u64,
     ) -> anyhow::Result<()> {
         let instructions: Vec<solana_sdk::instruction::Instruction> = extract_instructions(meta, transaction.clone())?;
 
-        if !self.is_buy {
-            for instruction in instructions.iter() {
-                if instruction.program_id == Pubkey::from_str(METEORA_PROGRAM_ADDR)? {
-                    if let Ok(pool_info) = self.process_meteora_instruction(&instruction).await {
-                        if pool_info.is_wsol_pair
-                            && pool_info.liquidity_added
-                            && !self.processed_pools.contains(&pool_info.pool_address)
-                        {
-                            info!("Meteota: new wsol pool found: {}", pool_info.pool_address);
+        for instruction in instructions.iter() {
+            if instruction.program_id == Pubkey::from_str(METEORA_PROGRAM_ADDR)? {
+                if let Ok(pool_info) = self.process_meteora_instruction(&instruction).await {
+                    if pool_info.is_wsol_pair
+                        && pool_info.liquidity_added
+                        && !self.processed_pools.contains(&pool_info.pool_address)
+                    {
+                        info!("METEORA: Liquidity added to WSOL pool");
 
-                            let target_token = if pool_info.wsol_is_token_a {
-                                pool_info.token_b_mint
-                            } else {
-                                pool_info.token_a_mint
-                            };
-                            self.processed_pools.insert(pool_info.pool_address);
+                        let target_token = if pool_info.wsol_is_token_a {
+                            pool_info.token_b_mint
+                        } else {
+                            pool_info.token_a_mint
+                        };
 
-                            let recent_blockhash: Hash = *transaction.message.recent_blockhash();
+                        self.processed_pools.insert(pool_info.pool_address);
 
-                            self.bench
-                                .clone()
-                                .send_meteora_buy_tx(
-                                    recent_blockhash,
-                                    target_token,
-                                    pool_info.pool_address,
-                                    pool_info.a_vault,
-                                )
-                                .await;
-                        }
+                        let recent_blockhash: Hash = *transaction.message.recent_blockhash();
+
+                        let pool_vault_info = PoolVaultInfo {
+                            pool_address: pool_info.pool_address,
+                            token_a_mint: pool_info.token_a_mint,
+                            token_b_mint: pool_info.token_b_mint,
+                            a_vault: pool_info.a_vault,
+                            b_vault: pool_info.b_vault,
+                            a_token_vault: pool_info.a_token_vault,
+                            b_token_vault: pool_info.b_token_vault,
+                            a_vault_lp_mint: pool_info.a_vault_lp_mint,
+                            b_vault_lp_mint: pool_info.b_vault_lp_mint,
+                            a_vault_lp: pool_info.a_vault_lp,
+                            b_vault_lp: pool_info.b_vault_lp,
+                            protocol_token_a_fee: pool_info.protocol_token_a_fee,
+                            protocol_token_b_fee: pool_info.protocol_token_b_fee,
+                            wsol_is_token_a: pool_info.wsol_is_token_a,
+                        };
+
+                        self.bench.clone().send_meteora_buy_tx(recent_blockhash, target_token, pool_vault_info).await;
+
+                        info!("Meteora: buy transactions completed");
                     }
                 }
             }
@@ -116,7 +124,9 @@ impl MeteoraController {
 
         match ix_discriminator {
             INIT_POOL_CONFIG2_DISC => self.parse_init_pool_config2(instruction).await,
-            _ => Err(anyhow::anyhow!("Not the target instruction type")),
+            ADD_LIQUIDITY_DISC => self.parse_add_liquidity(instruction).await,
+            DEPOSIT_DISC => self.parse_deposit(instruction).await,
+            _ => Err(anyhow::anyhow!("Not a target instruction type")),
         }
     }
 
@@ -124,7 +134,7 @@ impl MeteoraController {
         &self,
         instruction: &solana_sdk::instruction::Instruction,
     ) -> anyhow::Result<PoolInfo> {
-        if instruction.accounts.len() < 20 {
+        if instruction.accounts.len() < 18 {
             return Err(anyhow::anyhow!("Not enough accounts for Meteora pool creation"));
         }
 
@@ -135,8 +145,12 @@ impl MeteoraController {
         let b_vault = instruction.accounts[6].pubkey;
         let a_token_vault = instruction.accounts[7].pubkey;
         let b_token_vault = instruction.accounts[8].pubkey;
+        let a_vault_lp_mint = instruction.accounts[9].pubkey;
+        let b_vault_lp_mint = instruction.accounts[10].pubkey;
         let a_vault_lp = instruction.accounts[11].pubkey;
         let b_vault_lp = instruction.accounts[12].pubkey;
+        let protocol_token_a_fee = instruction.accounts[16].pubkey;
+        let protocol_token_b_fee = instruction.accounts[17].pubkey;
 
         let wsol_pubkey = Pubkey::from_str(WSOL_MINT)?;
         let is_wsol_pair = token_a_mint == wsol_pubkey || token_b_mint == wsol_pubkey;
@@ -147,7 +161,15 @@ impl MeteoraController {
             let ix_data = &instruction.data[IX_DISCRIMINATOR_SIZE..];
             if let Ok(init_data) = InitPoolConfig2Data::try_from_slice(ix_data) {
                 has_liquidity = init_data.token_a_amount > 0 && init_data.token_b_amount > 0;
+                info!(
+                    "Pool liquidity check: token_a={}, token_b={}",
+                    init_data.token_a_amount, init_data.token_b_amount
+                );
             }
+        }
+
+        if is_wsol_pair {
+            info!("WSOL pool detected: {} (liquidity: {})", pool_address, has_liquidity);
         }
 
         Ok(PoolInfo {
@@ -158,12 +180,76 @@ impl MeteoraController {
             b_vault,
             a_token_vault,
             b_token_vault,
+            a_vault_lp_mint,
+            b_vault_lp_mint,
             a_vault_lp,
             b_vault_lp,
+            protocol_token_a_fee,
+            protocol_token_b_fee,
             is_wsol_pair,
             wsol_is_token_a,
-            instruction_type: "initializePermissionlessConstantProductPoolWithConfig2".to_string(),
             liquidity_added: has_liquidity,
+        })
+    }
+
+    async fn parse_add_liquidity(
+        &self,
+        instruction: &solana_sdk::instruction::Instruction,
+    ) -> anyhow::Result<PoolInfo> {
+        if instruction.accounts.len() < 10 {
+            return Err(anyhow::anyhow!("Not enough accounts for add liquidity"));
+        }
+
+        let pool_address = instruction.accounts[0].pubkey;
+
+        info!("Meteora: ADD_LIQUIDITY detected for pool: {}", pool_address);
+
+        Ok(PoolInfo {
+            pool_address,
+            token_a_mint: Pubkey::default(),
+            token_b_mint: Pubkey::default(),
+            a_vault: Pubkey::default(),
+            b_vault: Pubkey::default(),
+            a_token_vault: Pubkey::default(),
+            b_token_vault: Pubkey::default(),
+            a_vault_lp_mint: Pubkey::default(),
+            b_vault_lp_mint: Pubkey::default(),
+            a_vault_lp: Pubkey::default(),
+            b_vault_lp: Pubkey::default(),
+            protocol_token_a_fee: Pubkey::default(),
+            protocol_token_b_fee: Pubkey::default(),
+            is_wsol_pair: true,
+            wsol_is_token_a: false,
+            liquidity_added: true,
+        })
+    }
+
+    async fn parse_deposit(&self, instruction: &solana_sdk::instruction::Instruction) -> anyhow::Result<PoolInfo> {
+        if instruction.accounts.len() < 8 {
+            return Err(anyhow::anyhow!("Not enough accounts for deposit"));
+        }
+
+        let pool_address = instruction.accounts[0].pubkey;
+
+        info!("Meteora: DEP detected for pool: {}", pool_address);
+
+        Ok(PoolInfo {
+            pool_address,
+            token_a_mint: Pubkey::default(),
+            token_b_mint: Pubkey::default(),
+            a_vault: Pubkey::default(),
+            b_vault: Pubkey::default(),
+            a_token_vault: Pubkey::default(),
+            b_token_vault: Pubkey::default(),
+            a_vault_lp_mint: Pubkey::default(),
+            b_vault_lp_mint: Pubkey::default(),
+            a_vault_lp: Pubkey::default(),
+            b_vault_lp: Pubkey::default(),
+            protocol_token_a_fee: Pubkey::default(),
+            protocol_token_b_fee: Pubkey::default(),
+            is_wsol_pair: true,
+            wsol_is_token_a: false,
+            liquidity_added: true,
         })
     }
 }

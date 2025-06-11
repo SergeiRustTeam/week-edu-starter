@@ -1,0 +1,27 @@
+geyser_url: "http://fra-geyser.rpc.urbanaio.com:11111"
+geyser_x_token: ""
+private_key: ""
+compute_unit_price: 100000
+compute_unit_limit: 200000
+tip: 0.01
+buy_amount: 0.1
+min_amount_out: 0.0
+
+rpc:
+  "solana_mainnet":
+    url: "https://api.mainnet-beta.solana.com"
+    rpc_type: "solana_rpc"
+
+  "jito_mainnet":
+    url: "https://mainnet.block-engine.jito.wtf/api/v1/transactions"
+    rpc_type: "jito"
+
+  "bloxroute_mainnet":
+    url: "http://ny.solana.dex.blxrbdn.com/api/v2/submit"
+    rpc_type: "bloxroute"
+    auth: ""
+
+  "nextblock_mainnet":
+    url: "http://fra.nextblock.io/api/v2/submit"
+    rpc_type: "next_block"
+    auth: ""

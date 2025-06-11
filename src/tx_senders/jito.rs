@@ -1,11 +1,11 @@
 use crate::config::RpcType;
-use crate::tx_senders::transaction::{TransactionConfig, build_transaction_with_config};
+use crate::tx_senders::transaction::{TransactionConfig, PoolVaultInfo, build_transaction_with_config};
 use crate::tx_senders::{TxResult, TxSender};
 use anyhow::Context;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 use solana_sdk::bs58;
 use solana_sdk::hash::Hash;
 use solana_sdk::pubkey::Pubkey;
@@ -33,43 +33,17 @@ impl JitoTxSender {
         &self,
         _index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        target_token: Pubkey,
+        pool_vault_info: PoolVaultInfo,
     ) -> VersionedTransaction {
         build_transaction_with_config(
             &self.tx_config,
             &RpcType::Jito,
             recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
+            target_token,
+            pool_vault_info,
         )
     }
-}
-
-#[derive(Deserialize)]
-pub struct JitoBundleStatusResponseInnerContext {
-    pub slot: u64,
-}
-
-#[derive(Deserialize)]
-pub struct JitoBundleStatusResponseInnerValue {
-    pub slot: u64,
-    pub bundle_id: String,
-    pub transactions: Vec<String>,
-    pub confirmation_status: String,
-    pub err: Value,
-}
-
-#[derive(Deserialize)]
-pub struct JitoBundleStatusResponseInner {
-    pub context: JitoBundleStatusResponseInnerContext,
-    pub value: Vec<JitoBundleStatusResponseInnerValue>,
-}
-#[derive(Deserialize)]
-pub struct JitoBundleStatusResponse {
-    pub result: JitoBundleStatusResponseInner,
 }
 
 #[derive(Deserialize)]
@@ -87,16 +61,14 @@ impl TxSender for JitoTxSender {
         &self,
         index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        target_token: Pubkey,
+        pool_vault_info: PoolVaultInfo,
     ) -> anyhow::Result<TxResult> {
         let tx = self.build_transaction_with_config(
             index,
             recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
+            target_token,
+            pool_vault_info,
         );
         let tx_bytes = bincode::serialize(&tx).context("cannot serialize tx to bincode")?;
         let encoded_transaction = bs58::encode(tx_bytes).into_string();
