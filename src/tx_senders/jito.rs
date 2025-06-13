@@ -1,5 +1,6 @@
 use crate::config::RpcType;
-use crate::tx_senders::transaction::{TransactionConfig, build_transaction_with_config};
+use crate::meteora::SwapAccountsFromPoolCreationInstruction;
+use crate::tx_senders::transaction::{TransactionConfig, build_meteora_swap_transaction_with_config};
 use crate::tx_senders::{TxResult, TxSender};
 use anyhow::Context;
 use async_trait::async_trait;
@@ -27,24 +28,6 @@ impl JitoTxSender {
             tx_config,
             client,
         }
-    }
-
-    pub fn build_transaction_with_config(
-        &self,
-        _index: u32,
-        recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
-    ) -> VersionedTransaction {
-        build_transaction_with_config(
-            &self.tx_config,
-            &RpcType::Jito,
-            recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
-        )
     }
 }
 
@@ -84,37 +67,47 @@ impl TxSender for JitoTxSender {
         self.name.clone()
     }
 
-    async fn send_transaction(
+    async fn send_meteora_swap_transaction(
         &self,
-        index: u32,
         recent_blockhash: Hash,
-        token_address: Pubkey,
-        bonding_curve: Pubkey,
-        associated_bonding_curve: Pubkey,
+        token_source_mint: Pubkey, // always WSOL
+        token_dest_mint: Pubkey,
+        protocol_token_fee: Pubkey,
+        accounts: SwapAccountsFromPoolCreationInstruction,
     ) -> anyhow::Result<TxResult> {
-        let tx = self.build_transaction_with_config(
-            index,
+        let transaction = build_meteora_swap_transaction_with_config(
+            &self.tx_config,
+            &RpcType::Jito,
             recent_blockhash,
-            token_address,
-            bonding_curve,
-            associated_bonding_curve,
+            token_source_mint, // always WSOL
+            token_dest_mint,
+            protocol_token_fee,
+            accounts,
         );
-        let tx_bytes = bincode::serialize(&tx).context("cannot serialize tx to bincode")?;
+
+        let tx_bytes = bincode::serialize(&transaction).context("cannot serialize transaction to bincode")?;
+
         let encoded_transaction = bs58::encode(tx_bytes).into_string();
+
         let body = json!({
             "jsonrpc": "2.0",
             "id": 1,
             "method": "sendTransaction",
             "params": [encoded_transaction]
         });
-        debug!("sending tx: {}", body.to_string());
+
+        debug!("sending meteora swap tx: {}", body);
+
         let response = self.client.post(&self.url).json(&body).send().await?;
         let status = response.status();
         let body = response.text().await?;
+
         if !status.is_success() {
-            return Err(anyhow::anyhow!("failed to send tx: {}", body));
+            return Err(anyhow::anyhow!("Jito failed to send tx: {}", body));
         }
-        let parsed_resp = serde_json::from_str::<JitoResponse>(&body).context("cannot deserialize signature")?;
+
+        let parsed_resp = serde_json::from_str::<JitoResponse>(&body).context("cannot deserialize Jito response")?;
+
         Ok(TxResult::BundleID(parsed_resp.result))
     }
 }

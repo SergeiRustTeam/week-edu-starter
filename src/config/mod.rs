@@ -16,6 +16,8 @@ pub struct PingThingsArgs {
     pub tip: f64,
     pub buy_amount: f64,
     pub min_amount_out: f64,
+    // Probably is not needed at all.
+    //pub activation_point: Option<u64>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
@@ -24,6 +26,8 @@ pub enum RpcType {
     #[default]
     SolanaRpc,
     Jito,
+    Bloxroute,
+    NextBlock,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct RpcConfig {
